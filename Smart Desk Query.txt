@@ -1,0 +1,93 @@
+USE WAREHOUSE GATOR_WH;
+USE DATABASE UCM;
+USE SCHEMA SMART_DESK;
+
+//1. Analisis completo de Ventas y beneficio por producto
+SELECT CATEGORY AS "VENTAS ABBOT INDUSTRIES EN EL AÑO 2020", SUM(PRODUCT) AS "Total venta productos", SUM(MAINTENANCE) AS "Total mantenimiento", 
+SUM(PARTS) AS "Total partes", SUM(SUPPORT) AS "Total soporte", SUM(PROFIT) AS "Beneficio total", 
+AVG(PROFIT) AS "Beneficio Promedio", SUM(UNITS_SOLD) AS "Unidades Vendidas"
+FROM SALES
+WHERE YEAR = 2020
+AND ACCOUNT = 'Abbot Industries'
+GROUP BY 1;
+
+//2. Cálculo de pronóstico total y beneficio esperado
+SELECT COALESCE(S.CATEGORY, F.CATEGORY) AS "Categorias",
+SUM(S.PROFIT) AS "Beneficio Total 2020 Q1 y 2021 Q3",
+SUM(F.FORECAST_PROFIT) AS "Pronostico Total 2022",
+MAX(F.OPPORTUNITY_AGE) AS "Oportunidad Vieja",
+MIN(F.OPPORTUNITY_AGE) AS "Oportunidad Joven"
+FROM SALES AS S
+FULL OUTER JOIN FORECASTS AS F ON S.CATEGORY = F.CATEGORY AND S.YEAR = F.YEAR
+WHERE ((S.YEAR = 2020 AND S.QUARTER_OF_YEAR= 'Q1') OR (S.YEAR = 2021 AND S.QUARTER_OF_YEAR='Q3') OR F.YEAR=2022)
+GROUP BY 1;
+
+//3. Comparación de ventas, unidades vendidas y beneficio entre industrias en APAC y EMEA
+SELECT A.INDUSTRY AS "Industrias",
+COUNTRY AS "Paises",
+SUM(PRODUCT) AS "Total de Productos",
+SUM(UNITS_SOLD) AS "Total Unidades Vendidas",
+SUM(PROFIT) AS "Beneficio Total",
+AVG(PROFIT) AS "Beneficio Promedio"
+FROM ACCOUNTS AS A
+INNER JOIN SALES AS S ON A.ACCOUNT = S.ACCOUNT
+WHERE REGION = 'APAC' OR REGION = 'EMEA'
+GROUP BY 1, 2;
+
+//4. Beneficio por tipo de empresa. Subquery de Forecast y el principal es de Accounts
+SELECT A.INDUSTRY AS "Industrias", SUM(F.FORECAST_PROFIT) AS Beneficio_Total_2022,
+    CASE
+        WHEN Beneficio_Total_2022 > 1000000 THEN 'Alto'
+        ELSE 'Normal'
+    END AS "Clasificación de Beneficio"
+FROM ACCOUNTS AS A
+JOIN FORECASTS AS F ON A.ACCOUNT = F.ACCOUNT
+WHERE F.FORECAST_PROFIT IN (
+                            SELECT FORECAST_PROFIT
+                            FROM FORECASTS
+                            WHERE FORECAST_PROFIT > 500000
+)
+GROUP BY 1;
+
+//5. Beneficio acumulado por trimestre particionado por industria
+SELECT Industry, 
+       Quarter,
+       Profit,
+       FORECAST_PROFIT,
+       SUM(Profit) OVER (PARTITION BY Industry ORDER BY Quarter) AS Beneficio_Acumulado,
+       SUM(FORECAST_PROFIT) OVER (PARTITION BY Industry ORDER BY Quarter) AS Pronostico_Acumulado,
+       Opportunity_Age
+FROM Forecasts F
+JOIN Accounts A ON F.Account = A.Account
+JOIN Sales S ON F.Account = S.Account
+GROUP BY 1,2,3,4,7
+ORDER BY 1,2;
+
+//Caso Practico clientes individuales frecuentes cuando el promedio de gastos de la venta es menor al 46%.
+SELECT ACCOUNT AS Clientes,
+SUM(PRODUCT) AS Total_Producto,
+SUM(TOTAL) AS Total_venta_y_servicios,
+(SUM(PRODUCT)/SUM(TOTAL)) AS Porcentaje_total_producto_para_Total,
+    CASE
+        WHEN Porcentaje_total_producto_para_Total > 0.46 THEN 'Servicios Normales'
+        ELSE 'Servicios Elevados'
+    END AS "Clasificación gastos",  
+AVG(TOTAL) AS TOTAL_Promedio, 
+    CASE
+        WHEN Total_venta_y_servicios <= TOTAL_Promedio THEN 'Cliente único'
+        ELSE 'Cliente Frecuente'
+    END AS "Clásificación cliente"
+FROM SALES
+GROUP BY 1
+ORDER BY 4 DESC;
+
+//Caso Practico industria el gasto se mantiene por debajo del 46% para los clientes que no retornan
+SELECT INDUSTRY,
+SUM(PRODUCT) AS Total_Producto,
+SUM(TOTAL) AS Total_venta_y_servicios,
+(SUM(PRODUCT)/SUM(TOTAL)) AS Porcentaje_total_producto_para_Total,
+AVG(TOTAL) AS TOTAL_Promedio
+FROM SALES AS S
+INNER JOIN ACCOUNTS AS A ON S.ACCOUNT = A.ACCOUNT
+GROUP BY 1
+ORDER BY 4;
